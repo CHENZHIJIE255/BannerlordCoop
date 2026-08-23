@@ -18,7 +18,25 @@ public sealed class MovementPrioritySchedulerTests
     }
 
     [Fact]
-    public void EqualDistance_OlderAgentHasPriority()
+    public void NearTierWinsOverMediumTierEvenWhenMediumAgentIsOlder()
+    {
+        MovementPriorityKey near = Create(distance: 20f, currentTime: 10f, lastSentTime: 9f);
+        MovementPriorityKey medium = Create(distance: 100f, currentTime: 10f, lastSentTime: 9.9f);
+
+        Assert.True(scheduler.Compare(near, medium) < 0);
+    }
+
+    [Fact]
+    public void MediumTierWinsOverFarTierWhenAgeIsEqual()
+    {
+        MovementPriorityKey medium = Create(distance: 100f, currentTime: 10f, lastSentTime: 9.9f);
+        MovementPriorityKey far = Create(distance: 250f, currentTime: 10f, lastSentTime: 9.9f);
+
+        Assert.True(scheduler.Compare(medium, far) < 0);
+    }
+
+    [Fact]
+    public void EqualDistance_OlderAgentHasPriorityWithinSameTier()
     {
         MovementPriorityKey older = Create(distance: 25f, currentTime: 10f, lastSentTime: 9.7f);
         MovementPriorityKey newer = Create(distance: 25f, currentTime: 10f, lastSentTime: 9.95f);
@@ -27,24 +45,18 @@ public sealed class MovementPrioritySchedulerTests
     }
 
     [Fact]
-    public void FarthestAgentCrossesFreshNearestAgentAfterThreeHalfLives()
+    public void FarAgentCanCatchUpOnlyWithinItsOwnDistanceTier()
     {
-        MovementPriorityKey freshNear = Create(distance: 0f, currentTime: 10f, lastSentTime: 10f);
-        MovementPriorityKey staleFar = Create(
-            distance: MovementPriorityScheduler.InterestRadius,
+        MovementPriorityKey freshMedium = Create(
+            distance: 100f,
             currentTime: 10f,
-            lastSentTime: 10f - MovementPriorityScheduler.MaximumPriorityAgingSeconds - 0.001f);
+            lastSentTime: 10f);
+        MovementPriorityKey staleMedium = Create(
+            distance: 100f,
+            currentTime: 10f,
+            lastSentTime: 9.7f);
 
-        Assert.True(scheduler.Compare(staleFar, freshNear) < 0);
-    }
-
-    [Fact]
-    public void ZeroDistanceAgentDoesNotRemainPermanentlyFirst()
-    {
-        MovementPriorityKey justSentAtZero = Create(distance: 0f, currentTime: 5f, lastSentTime: 5f);
-        MovementPriorityKey staleFar = Create(distance: 75f, currentTime: 5f, lastSentTime: 4.7f);
-
-        Assert.True(scheduler.Compare(staleFar, justSentAtZero) < 0);
+        Assert.True(scheduler.Compare(staleMedium, freshMedium) < 0);
     }
 
     [Fact]
@@ -61,28 +73,40 @@ public sealed class MovementPrioritySchedulerTests
     }
 
     [Fact]
-    public void MissingFocusUsesAgeOnlyOrdering()
+    public void MissingFocusFallsBackToTheFarthestTier()
     {
-        MovementPriorityKey older = Create(distance: null, currentTime: 10f, lastSentTime: 9.7f);
-        MovementPriorityKey newer = Create(distance: null, currentTime: 10f, lastSentTime: 9.9f);
+        MovementPriorityKey missingFocus = Create(distance: null, currentTime: 10f, lastSentTime: 9.9f);
+        MovementPriorityKey knownFar = Create(distance: 250f, currentTime: 10f, lastSentTime: 9.9f);
 
-        Assert.True(scheduler.Compare(older, newer) < 0);
+        Assert.Equal(4, missingFocus.Tier);
+        Assert.Equal(4, knownFar.Tier);
     }
 
     [Fact]
-    public void LocalMainAgentWinsBeforeScoreComparison()
+    public void LocalMainAgentWinsBeforeDistanceTier()
     {
         MovementPriorityKey main = Create(
             distance: 75f,
             currentTime: 10f,
             lastSentTime: 10f,
             isMain: true);
-        MovementPriorityKey staleNearbyAgent = Create(
+        MovementPriorityKey nearAgent = Create(
             distance: 0f,
             currentTime: 10f,
             lastSentTime: 9f);
 
-        Assert.True(scheduler.Compare(main, staleNearbyAgent) < 0);
+        Assert.True(scheduler.Compare(main, nearAgent) < 0);
+    }
+
+    [Fact]
+    public void TierBoundariesAreStable()
+    {
+        Assert.Equal(1, Create(30f, 10f, 9.9f).Tier);
+        Assert.Equal(2, Create(30.01f, 10f, 9.9f).Tier);
+        Assert.Equal(2, Create(75f, 10f, 9.9f).Tier);
+        Assert.Equal(3, Create(75.01f, 10f, 9.9f).Tier);
+        Assert.Equal(3, Create(150f, 10f, 9.9f).Tier);
+        Assert.Equal(4, Create(150.01f, 10f, 9.9f).Tier);
     }
 
     private MovementPriorityKey Create(

@@ -45,18 +45,33 @@ public sealed class MovementPrioritySchedulerTests
     }
 
     [Fact]
-    public void FarAgentCanCatchUpOnlyWithinItsOwnDistanceTier()
+    public void FarAgentDoesNotImmediatelyDisplaceFreshNearAgent()
     {
-        MovementPriorityKey freshMedium = Create(
-            distance: 100f,
+        MovementPriorityKey freshNear = Create(
+            distance: 10f,
             currentTime: 10f,
             lastSentTime: 10f);
-        MovementPriorityKey staleMedium = Create(
-            distance: 100f,
+        MovementPriorityKey staleFar = Create(
+            distance: 250f,
             currentTime: 10f,
-            lastSentTime: 9.7f);
+            lastSentTime: 9.2f);
 
-        Assert.True(scheduler.Compare(staleMedium, freshMedium) < 0);
+        Assert.True(scheduler.Compare(freshNear, staleFar) < 0);
+    }
+
+    [Fact]
+    public void FarAgentStillEventuallyAgesWithinItsTier()
+    {
+        MovementPriorityKey olderFar = Create(
+            distance: 250f,
+            currentTime: 10f,
+            lastSentTime: 7.5f);
+        MovementPriorityKey newerFar = Create(
+            distance: 250f,
+            currentTime: 10f,
+            lastSentTime: 9.9f);
+
+        Assert.True(scheduler.Compare(olderFar, newerFar) < 0);
     }
 
     [Fact]
@@ -107,6 +122,39 @@ public sealed class MovementPrioritySchedulerTests
         Assert.Equal(3, Create(75.01f, 10f, 9.9f).Tier);
         Assert.Equal(3, Create(150f, 10f, 9.9f).Tier);
         Assert.Equal(4, Create(150.01f, 10f, 9.9f).Tier);
+        Assert.Equal(4, Create(300f, 10f, 9.9f).Tier);
+    }
+
+    [Fact]
+    public void InterestCadenceSlowsWithDistance()
+    {
+        float near = scheduler.GetUpdateIntervalSeconds(false, 10f, false);
+        float medium = scheduler.GetUpdateIntervalSeconds(false, 100f, false);
+        float far = scheduler.GetUpdateIntervalSeconds(false, 250f, false);
+        float distant = scheduler.GetUpdateIntervalSeconds(false, 500f, false);
+
+        Assert.True(near < medium);
+        Assert.True(medium < far);
+        Assert.True(far < distant);
+    }
+
+    [Fact]
+    public void MountInterestCadenceIsSlowerThanOnFootAtLongRange()
+    {
+        Assert.True(
+            scheduler.GetUpdateIntervalSeconds(false, 250f, true) >
+            scheduler.GetUpdateIntervalSeconds(false, 250f, false));
+    }
+
+    [Fact]
+    public void MissingFocusUsesConservativeCadence()
+    {
+        Assert.Equal(
+            0.75f,
+            scheduler.GetUpdateIntervalSeconds(false, null, false));
+        Assert.Equal(
+            1f,
+            scheduler.GetUpdateIntervalSeconds(false, null, true));
     }
 
     private MovementPriorityKey Create(

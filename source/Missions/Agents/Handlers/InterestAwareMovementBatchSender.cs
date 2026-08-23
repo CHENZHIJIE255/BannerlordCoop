@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Common.PacketHandlers;
+using System;
 using System.Collections.Generic;
 
 namespace Missions.Agents.Handlers;
@@ -104,7 +105,9 @@ public sealed class InterestAwareMovementBatchSender : IMovementBatchSender
         string controllerId,
         int deferredSnapshots,
         float maximumDeferredAgeSeconds) =>
-        inner.EndFrame(controllerId, deferredSnapshots, maximumDeferredAgeSeconds);
+        // Interest gating is intentional scheduling, not network backlog. Do not feed its cadence age
+        // into the adaptive rate controller as if it were congestion.
+        inner.EndFrame(controllerId, deferredSnapshots, 0f);
 
     public void RemoveRecipient(string controllerId)
     {
@@ -125,11 +128,14 @@ public sealed class InterestAwareMovementBatchSender : IMovementBatchSender
         MovementBatch<T> legacyBatch)
     {
         var result = new List<MovementBatch<T>>();
-        foreach (MovementBatch<T> source in scopedBatches)
+        if (scopedBatches != null)
         {
-            MovementBatch<T> filtered = FilterBatch(controllerId, source);
-            if (filtered != null && filtered.Data.Count > 0)
-                result.Add(filtered);
+            foreach (MovementBatch<T> source in scopedBatches)
+            {
+                MovementBatch<T> filtered = FilterBatch(controllerId, source);
+                if (filtered != null && filtered.Data.Count > 0)
+                    result.Add(filtered);
+            }
         }
 
         // Legacy batches do not carry MovementPriorityKey values, so retain their existing semantics.

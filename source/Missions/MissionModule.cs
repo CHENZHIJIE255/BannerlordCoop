@@ -60,7 +60,11 @@ public class MissionModule : Module
         builder.RegisterType<MovementTrafficBudgetFactory>()
             .As<IMovementTrafficBudgetFactory>()
             .InstancePerDependency();
+        // Keep the concrete sender separately resolvable so the interest-management layer can wrap it.
         builder.RegisterType<MovementBatchSender>()
+            .AsSelf()
+            .InstancePerDependency();
+        builder.RegisterType<InterestAwareMovementBatchSender>()
             .As<IMovementBatchSender>()
             .InstancePerDependency();
         builder.RegisterType<MovementRateController>()

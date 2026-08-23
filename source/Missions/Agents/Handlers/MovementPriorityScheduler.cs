@@ -39,13 +39,18 @@ public readonly struct MovementPriorityKey
     }
 }
 
-/// <summary>Ranks current snapshots by local-player tier, distance and time since successful delivery.</summary>
+/// <summary>
+/// Ranks movement snapshots by local-player priority, distance bands and staleness.
+/// Nearby agents stay ahead of distant agents when the shared movement budget is constrained.
+/// </summary>
 public sealed class MovementPriorityScheduler : IMovementPriorityScheduler
 {
+    public const float NearRadius = 30f;
     public const float InterestRadius = 75f;
+    public const float MediumRadius = 150f;
     public const double DistanceWeight = 7d;
-    public const double StalenessHalfLifeSeconds = 0.075d;
-    public const float MaximumPriorityAgingSeconds = 0.225f;
+    public const double StalenessHalfLifeSeconds = 0.15d;
+    public const float MaximumPriorityAgingSeconds = 0.5f;
 
     public MovementPriorityKey CreateKey(
         bool isLocalMainAgent,
@@ -55,9 +60,26 @@ public sealed class MovementPriorityScheduler : IMovementPriorityScheduler
         float pendingSince,
         Guid agentId)
     {
-        float normalizedDistance = distanceToRecipientFocus.HasValue
-            ? Math.Max(0f, Math.Min(1f, distanceToRecipientFocus.Value / InterestRadius))
-            : 1f;
+        float distance = distanceToRecipientFocus.HasValue
+            ? Math.Max(0f, distanceToRecipientFocus.Value)
+            : float.PositiveInfinity;
+
+        // Keep the local player absolute-highest priority. For other agents, use explicit
+        // interest bands so a far-away agent cannot routinely displace a nearby combatant just
+        // because its snapshot happened to age by a few frames.
+        int tier = isLocalMainAgent
+            ? 0
+            : distance <= NearRadius
+                ? 1
+                : distance <= InterestRadius
+                    ? 2
+                    : distance <= MediumRadius
+                        ? 3
+                        : 4;
+
+        double normalizedDistance = float.IsPositiveInfinity(distance)
+            ? 1d
+            : Math.Max(0d, Math.Min(1d, distance / InterestRadius));
         double distanceComponent = 1d + (DistanceWeight * normalizedDistance);
 
         float effectiveLastSent = lastSuccessfulSendTime ??
@@ -68,7 +90,7 @@ public sealed class MovementPriorityScheduler : IMovementPriorityScheduler
             age / StalenessHalfLifeSeconds);
 
         return new MovementPriorityKey(
-            isLocalMainAgent ? 0 : 1,
+            tier,
             distanceComponent * lastUpdatedComponent,
             lastSuccessfulSendTime ?? float.MinValue,
             pendingSince,

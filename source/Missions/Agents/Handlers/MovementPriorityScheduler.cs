@@ -13,6 +13,11 @@ public interface IMovementPriorityScheduler
         Guid agentId);
 
     int Compare(MovementPriorityKey left, MovementPriorityKey right);
+
+    float GetUpdateIntervalSeconds(
+        bool isLocalMainAgent,
+        float? distanceToRecipientFocus,
+        bool isMount);
 }
 
 /// <summary>Stable per-recipient ordering key for one current movement snapshot.</summary>
@@ -41,13 +46,14 @@ public readonly struct MovementPriorityKey
 
 /// <summary>
 /// Ranks movement snapshots by local-player priority, distance bands and staleness.
-/// Nearby agents stay ahead of distant agents when the shared movement budget is constrained.
+/// Also defines the per-recipient interest cadence used to avoid producing needless remote movement traffic.
 /// </summary>
 public sealed class MovementPriorityScheduler : IMovementPriorityScheduler
 {
     public const float NearRadius = 30f;
     public const float InterestRadius = 75f;
     public const float MediumRadius = 150f;
+    public const float FarRadius = 300f;
     public const double DistanceWeight = 7d;
     public const double StalenessHalfLifeSeconds = 0.15d;
     public const float MaximumPriorityAgingSeconds = 0.5f;
@@ -95,6 +101,32 @@ public sealed class MovementPriorityScheduler : IMovementPriorityScheduler
             lastSuccessfulSendTime ?? float.MinValue,
             pendingSince,
             agentId);
+    }
+
+    public float GetUpdateIntervalSeconds(
+        bool isLocalMainAgent,
+        float? distanceToRecipientFocus,
+        bool isMount)
+    {
+        if (isLocalMainAgent)
+            return isMount ? 1f / 30f : 1f / 40f;
+
+        if (!distanceToRecipientFocus.HasValue)
+            return isMount ? 1f : 0.5f;
+
+        float distance = Math.Max(0f, distanceToRecipientFocus.Value);
+        if (distance <= NearRadius)
+            return isMount ? 1f / 30f : 1f / 30f;
+        if (distance <= InterestRadius)
+            return isMount ? 1f / 12f : 1f / 15f;
+        if (distance <= MediumRadius)
+            return isMount ? 0.33f : 0.2f;
+        if (distance <= FarRadius)
+            return isMount ? 0.5f : 0.33f;
+
+        // Very distant agents receive an occasional heartbeat so they never disappear permanently,
+        // but they no longer consume battle-rate movement bandwidth.
+        return isMount ? 1f : 0.5f;
     }
 
     public int Compare(MovementPriorityKey left, MovementPriorityKey right)

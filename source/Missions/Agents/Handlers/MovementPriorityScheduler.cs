@@ -27,6 +27,7 @@ public readonly struct MovementPriorityKey
     public double Score { get; }
     public float LastSuccessfulSendTime { get; }
     public float PendingSince { get; }
+    public float UpdateIntervalSeconds { get; }
     public Guid AgentId { get; }
 
     public MovementPriorityKey(
@@ -34,12 +35,14 @@ public readonly struct MovementPriorityKey
         double score,
         float lastSuccessfulSendTime,
         float pendingSince,
+        float updateIntervalSeconds,
         Guid agentId)
     {
         Tier = tier;
         Score = score;
         LastSuccessfulSendTime = lastSuccessfulSendTime;
         PendingSince = pendingSince;
+        UpdateIntervalSeconds = updateIntervalSeconds;
         AgentId = agentId;
     }
 }
@@ -101,6 +104,10 @@ public sealed class MovementPriorityScheduler : IMovementPriorityScheduler
         double distanceComponent = tierDistanceBias +
             (DistanceWeight * normalizedDistance);
 
+        float updateInterval = GetUpdateIntervalSeconds(
+            isLocalMainAgent,
+            distanceToRecipientFocus,
+            false);
         float effectiveLastSent = lastSuccessfulSendTime ??
             (pendingSince - MaximumPriorityAgingSeconds);
         double age = Math.Max(0d, currentTime - effectiveLastSent);
@@ -120,6 +127,7 @@ public sealed class MovementPriorityScheduler : IMovementPriorityScheduler
             distanceComponent * lastUpdatedComponent,
             lastSuccessfulSendTime ?? float.MinValue,
             pendingSince,
+            updateInterval,
             agentId);
     }
 

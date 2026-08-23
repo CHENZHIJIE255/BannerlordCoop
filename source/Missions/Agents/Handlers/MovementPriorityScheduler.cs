@@ -47,6 +47,8 @@ public readonly struct MovementPriorityKey
 /// <summary>
 /// Ranks movement snapshots by local-player priority, distance bands and staleness.
 /// Also defines the per-recipient interest cadence used to avoid producing needless remote movement traffic.
+/// Large battle tuning intentionally makes distant agents age more slowly so they do not repeatedly reclaim
+/// bandwidth from nearby combatants after only a few missed snapshots.
 /// </summary>
 public sealed class MovementPriorityScheduler : IMovementPriorityScheduler
 {
@@ -55,7 +57,10 @@ public sealed class MovementPriorityScheduler : IMovementPriorityScheduler
     public const float MediumRadius = 150f;
     public const float FarRadius = 300f;
     public const double DistanceWeight = 7d;
-    public const double StalenessHalfLifeSeconds = 0.15d;
+    public const double NearbyStalenessHalfLifeSeconds = 0.15d;
+    public const double MediumStalenessHalfLifeSeconds = 0.35d;
+    public const double FarStalenessHalfLifeSeconds = 0.9d;
+    public const double DistantStalenessHalfLifeSeconds = 2.0d;
     public const float MaximumPriorityAgingSeconds = 0.5f;
 
     public MovementPriorityKey CreateKey(
@@ -86,14 +91,29 @@ public sealed class MovementPriorityScheduler : IMovementPriorityScheduler
         double normalizedDistance = float.IsPositiveInfinity(distance)
             ? 1d
             : Math.Max(0d, Math.Min(1d, distance / InterestRadius));
-        double distanceComponent = 1d + (DistanceWeight * normalizedDistance);
+        double tierDistanceBias = tier == 1
+            ? 0.5d
+            : tier == 2
+                ? 1.0d
+                : tier == 3
+                    ? 8.0d
+                    : 32.0d;
+        double distanceComponent = tierDistanceBias +
+            (DistanceWeight * normalizedDistance);
 
         float effectiveLastSent = lastSuccessfulSendTime ??
             (pendingSince - MaximumPriorityAgingSeconds);
         double age = Math.Max(0d, currentTime - effectiveLastSent);
-        double lastUpdatedComponent = Math.Pow(
-            0.5d,
-            age / StalenessHalfLifeSeconds);
+        double halfLife = tier <= 2
+            ? NearbyStalenessHalfLifeSeconds
+            : tier == 3
+                ? MediumStalenessHalfLifeSeconds
+                : tier == 4
+                    ? (float.IsPositiveInfinity(distance)
+                        ? DistantStalenessHalfLifeSeconds
+                        : FarStalenessHalfLifeSeconds)
+                    : NearbyStalenessHalfLifeSeconds;
+        double lastUpdatedComponent = Math.Pow(0.5d, age / halfLife);
 
         return new MovementPriorityKey(
             tier,
@@ -112,7 +132,7 @@ public sealed class MovementPriorityScheduler : IMovementPriorityScheduler
             return isMount ? 1f / 30f : 1f / 40f;
 
         if (!distanceToRecipientFocus.HasValue)
-            return isMount ? 1f : 0.5f;
+            return isMount ? 1f : 0.75f;
 
         float distance = Math.Max(0f, distanceToRecipientFocus.Value);
         if (distance <= NearRadius)
@@ -120,13 +140,11 @@ public sealed class MovementPriorityScheduler : IMovementPriorityScheduler
         if (distance <= InterestRadius)
             return isMount ? 1f / 12f : 1f / 15f;
         if (distance <= MediumRadius)
-            return isMount ? 0.33f : 0.2f;
+            return isMount ? 0.4f : 0.2f;
         if (distance <= FarRadius)
-            return isMount ? 0.5f : 0.33f;
+            return isMount ? 0.75f : 0.4f;
 
-        // Very distant agents receive an occasional heartbeat so they never disappear permanently,
-        // but they no longer consume battle-rate movement bandwidth.
-        return isMount ? 1f : 0.5f;
+        return isMount ? 1.25f : 0.75f;
     }
 
     public int Compare(MovementPriorityKey left, MovementPriorityKey right)
